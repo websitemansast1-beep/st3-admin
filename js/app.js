@@ -17,10 +17,6 @@ function toast(msg) {
 
 function getToken() { return localStorage.getItem('mfx_admin_token'); }
 function setToken(t) { localStorage.setItem('mfx_admin_token', t); }
-// Refresh token (30-day expiry, issued alongside the access token at
-// login) — same pattern as the student site's app.js. Storing and using
-// this is what lets a session survive past the access token's short
-// expiry without bouncing the admin back to the login page.
 function getRefreshToken() { return localStorage.getItem('mfx_admin_refresh_token'); }
 function setRefreshToken(t) { localStorage.setItem('mfx_admin_refresh_token', t); }
 function logout() {
@@ -63,27 +59,35 @@ async function withButtonLock(btn, busyText, fn) {
 
 // Reads the JWT's own expiry (exp claim) without a network call, so an
 // expired session is caught the instant the page loads instead of only
-// after some data request fails with 401.
+// after some data request fails with 401. Same 5-minute clock-skew grace
+// window as the student site — a device with a slightly fast clock
+// shouldn't see a freshly-issued token as already expired.
 function isTokenExpired(token) {
   try {
     const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
     if (!payload.exp) return false;
-    return Date.now() >= payload.exp * 1000;
+    const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
+    return Date.now() >= (payload.exp * 1000 + CLOCK_SKEW_TOLERANCE_MS);
   } catch (e) {
     return true; // unreadable token = treat as expired
   }
 }
 
-// Silently exchanges the stored refresh token for a fresh access token
-// (POST /api/auth/refresh — 30-day refresh token issued at login).
-// If several requests hit a 401 at the same moment, they all share this
-// same in-flight refresh instead of each firing their own /refresh call.
+// Silently exchanges the stored refresh token (30-day lifetime, issued at
+// login — see routes/auth.js POST /auth/refresh) for a brand-new access
+// token (15-minute lifetime, config.jwt.accessExpires). This is what was
+// missing here exactly like on the student site: admins were getting
+// logged out mid-session every time the 15-minute access token expired,
+// because the refreshToken the server already sends back at login was
+// never stored or used. Concurrent callers share the same in-flight
+// request instead of each firing their own refresh.
 let refreshInFlight = null;
 async function refreshAccessToken() {
-  if (refreshInFlight) return refreshInFlight;
   const refreshToken = getRefreshToken();
   if (!refreshToken) return false;
-  const p = (async () => {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
     try {
       const res = await fetch(API + '/auth/refresh', {
         method: 'POST',
@@ -92,57 +96,71 @@ async function refreshAccessToken() {
       });
       if (!res.ok) return false;
       const data = await res.json();
-      if (data && data.token) {
-        setToken(data.token);
-        if (data.refreshToken) setRefreshToken(data.refreshToken);
-        return true;
-      }
-      return false;
+      if (!data || !data.ok || !data.data || !data.data.accessToken) return false;
+      setToken(data.data.accessToken);
+      return true;
     } catch (e) {
       return false;
     }
   })();
-  refreshInFlight = p;
+
   try {
-    return await p;
+    return await refreshInFlight;
   } finally {
     refreshInFlight = null;
   }
 }
 
-async function api(path, opts = {}, _retried = false) {
+async function api(path, opts = {}) {
   const url = API + path;
-  const headers = { 'Content-Type': 'application/json' };
-  const token = getToken();
-  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const doFetch = async () => {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = getToken();
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return fetch(url, { ...opts, headers: { ...headers, ...opts.headers } });
+  };
   try {
-    const res = await fetch(url, { ...opts, headers: { ...headers, ...opts.headers } });
+    let res = await doFetch();
+    // A 401 mid-session (the access token expired while actively working
+    // — e.g. mid-way through reviewing a long list of students) used to
+    // log the admin out immediately. Now: try ONE silent refresh + retry
+    // first, and only fall back to logout if the refresh itself fails
+    // (meaning the refresh token is gone/expired too — a real 30-day-old
+    // session, or a genuinely revoked one).
     if (res.status === 401) {
-      // Access token expired mid-session — try one silent refresh +
-      // retry before giving up and logging the admin out.
-      if (!_retried) {
-        const refreshed = await refreshAccessToken();
-        if (refreshed) return api(path, opts, true);
-      }
-      logout();
-      return;
+      const refreshed = await refreshAccessToken();
+      if (!refreshed) { logout(); return; }
+      res = await doFetch();
+      if (res.status === 401) { logout(); return; }
     }
     return await res.json();
   } catch (e) { toast('❌ خطأ في الاتصال'); throw e; }
 }
 
-// Now async: on page load, an expired access token no longer means an
-// instant logout — it means "try a silent refresh first". Only a failed
-// refresh (i.e. the 30-day refresh token itself is gone/expired) sends
-// the admin back to login.html.
+// Auth check — runs on every page load. Instead of logging the admin out
+// the instant the access token's 15-minute exp has passed, try a silent
+// refresh first and only send them to login if that refresh also fails.
+// Returns true/false so the init flow below can wait for it before
+// loading any page data.
 async function requireAuth() {
   const onLoginPage = location.pathname.includes('login.html');
+  if (onLoginPage) return true;
+
   const token = getToken();
-  if (onLoginPage) return;
-  if (!token || isTokenExpired(token)) {
-    const refreshed = await refreshAccessToken();
-    if (!refreshed) { logout(); return; }
+  if (!token) {
+    logout();
+    return false;
   }
+
+  if (isTokenExpired(token)) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) {
+      logout();
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // Admin Login
@@ -1859,12 +1877,21 @@ async function withPageLoader(fn) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Wait for the (possibly silent-refresh) auth check to settle before
-  // any page tries to load data with a token that might have just been
-  // renewed — avoids a stray request firing with the old/expired token.
-  await requireAuth();
   const path = location.pathname;
-  if (path.includes('login.html')) return;
+  if (path.includes('login.html')) {
+    // Login page never has a token to check — nothing to await.
+    requireAuth();
+    return;
+  }
+
+  // Wait for requireAuth() to finish (including a silent refresh, if one
+  // was needed) before deciding whether to load page data — firing the
+  // page's load function in parallel with an in-flight refresh could
+  // otherwise let the FIRST api() call race the refresh and 401 before
+  // the new token was saved.
+  const authed = await requireAuth();
+  if (!authed) return; // already redirected to login.html
+
   if (path.includes('index.html')) withPageLoader(loadAdminDashboard);
   if (path.includes('units.html')) withPageLoader(loadUnitsPage);
   if (path.includes('codes.html')) withPageLoader(loadCodesPage);
