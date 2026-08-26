@@ -4,6 +4,7 @@ const API = 'https://web-production-dcdc4.up.railway.app/api';
 // pre-filled code. Update this if the student site's domain ever changes.
 const STUDENT_SITE_URL = 'https://st3-student.vercel.app';
 
+
 function toast(msg) {
   let t = document.querySelector('.toast');
   if (t) t.remove();
@@ -2097,3 +2098,5 @@ async function submitAiImport() {
     status.textContent = '❌ حصل خطأ أثناء الاستيراد';
   }
 }
+
+ 
