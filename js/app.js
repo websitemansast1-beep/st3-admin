@@ -1,9 +1,8 @@
 // ===== MFX Admin App =====
-const API = 'https://web-production-dcdc4.up.railway.app/api';
+const API = 'https://mrmomd-production.up.railway.app/api';
 // Used to build the QR-code deep link students scan to log in with a
 // pre-filled code. Update this if the student site's domain ever changes.
-const STUDENT_SITE_URL = 'https://st3-student.vercel.app';
-
+const STUDENT_SITE_URL = 'https://student-momdoh.vercel.app';
 
 function toast(msg) {
   let t = document.querySelector('.toast');
@@ -60,9 +59,9 @@ async function withButtonLock(btn, busyText, fn) {
 
 // Reads the JWT's own expiry (exp claim) without a network call, so an
 // expired session is caught the instant the page loads instead of only
-// after some data request fails with 401. Same 5-minute clock-skew grace
-// window as the student site — a device with a slightly fast clock
-// shouldn't see a freshly-issued token as already expired.
+// after some data request fails with 401. A 5-minute clock-skew grace
+// window absorbs a device with a slightly fast clock — otherwise a
+// freshly-issued, perfectly valid token could look "already expired".
 function isTokenExpired(token) {
   try {
     const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
@@ -76,12 +75,11 @@ function isTokenExpired(token) {
 
 // Silently exchanges the stored refresh token (30-day lifetime, issued at
 // login — see routes/auth.js POST /auth/refresh) for a brand-new access
-// token (15-minute lifetime, config.jwt.accessExpires). This is what was
-// missing here exactly like on the student site: admins were getting
-// logged out mid-session every time the 15-minute access token expired,
-// because the refreshToken the server already sends back at login was
-// never stored or used. Concurrent callers share the same in-flight
-// request instead of each firing their own refresh.
+// token (15-minute lifetime). Without this, admins were getting logged
+// out mid-session every time the 15-minute access token expired, because
+// the refreshToken the server already sends back at login was never
+// stored or used. Concurrent callers share the same in-flight request
+// instead of each firing their own refresh.
 let refreshInFlight = null;
 async function refreshAccessToken() {
   const refreshToken = getRefreshToken();
@@ -122,12 +120,10 @@ async function api(path, opts = {}) {
   };
   try {
     let res = await doFetch();
-    // A 401 mid-session (the access token expired while actively working
-    // — e.g. mid-way through reviewing a long list of students) used to
-    // log the admin out immediately. Now: try ONE silent refresh + retry
-    // first, and only fall back to logout if the refresh itself fails
-    // (meaning the refresh token is gone/expired too — a real 30-day-old
-    // session, or a genuinely revoked one).
+    // A 401 mid-session (the access token expired while actively working)
+    // used to log the admin out immediately. Now: try ONE silent refresh
+    // + retry first, and only fall back to logout if the refresh itself
+    // fails (meaning the refresh token is gone/expired too).
     if (res.status === 401) {
       const refreshed = await refreshAccessToken();
       if (!refreshed) { logout(); return; }
@@ -1859,7 +1855,7 @@ function showPageLoader() {
   if (document.querySelector('.mfx-page-loader')) return;
   const el = document.createElement('div');
   el.className = 'mfx-page-loader';
-  el.innerHTML = '<div class="mfx-page-loader-content"><div class="mfx-page-loader-ring"></div><div class="mfx-page-loader-credit">صنع بواسطة يوسف ماهر</div></div>';
+  el.innerHTML = '<div class="mfx-page-loader-content"><div class="loader-cube-wrap"><div class="loader-cube"><div class="face face-front"></div><div class="face face-back"></div><div class="face face-right"></div><div class="face face-left"></div><div class="face face-top"></div><div class="face face-bottom"></div></div></div><div class="mfx-page-loader-credit">صنع بواسطة يوسف ماهر</div></div>';
   document.body.appendChild(el);
 }
 function hidePageLoader() {
@@ -1877,10 +1873,20 @@ async function withPageLoader(fn) {
   }
 }
 
+// Mobile nav drawer — the sidebar used to just disappear on small screens
+// (display:none) with no way back to it, which is what made most of the
+// dashboard unreachable from a phone. Now it's an off-canvas drawer
+// toggled by the hamburger button + backdrop added to every dashboard
+// page; the CSS handles the actual slide animation via the "mfx-open"
+// class, this just flips it on both elements together.
+function toggleMfxSidebar() {
+  document.querySelector('.dash-sidebar')?.classList.toggle('mfx-open');
+  document.getElementById('mfx-sidebar-backdrop')?.classList.toggle('mfx-open');
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const path = location.pathname;
   if (path.includes('login.html')) {
-    // Login page never has a token to check — nothing to await.
     requireAuth();
     return;
   }
@@ -2098,5 +2104,3 @@ async function submitAiImport() {
     status.textContent = '❌ حصل خطأ أثناء الاستيراد';
   }
 }
-
- 
