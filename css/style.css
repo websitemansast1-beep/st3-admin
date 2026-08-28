@@ -782,51 +782,50 @@ tr:hover td { background: rgba(238,241,247,0.03); }
   .section { padding: 60px 0; }
   .grid-3, .grid-4 { grid-template-columns: 1fr; }
   .auth-card { padding: 36px 24px; }
-  /* FIX: the sidebar used to just vanish here (display:none) with no
-     way back to it — that's what made most of the dashboard
-     unreachable from a phone. Now it becomes a slide-in drawer instead:
-     hidden off-screen by default, and shown by adding the
-     "mfx-open" class (see the toggle button + backdrop below). */
+  /* FIX (v2): the drawer approach depended on a JS toggle function and
+     HTML button being deployed in sync with this CSS — any mismatch
+     between those files meant the menu silently did nothing. This
+     version needs NONE of that: the sidebar itself becomes an
+     always-visible horizontal bar pinned to the top of the screen,
+     scrollable sideways if it doesn't all fit. No button, no JS, no
+     "open" state — it's just always there. The hamburger button and
+     backdrop from the old approach are hidden below so leftover HTML
+     markup for them causes no harm if it's still present. */
   .dash-sidebar {
-    transform: translateX(105%);
-    transition: transform 0.25s ease;
-    box-shadow: -8px 0 30px rgba(0,0,0,0.4);
+    width: 100%;
+    height: auto;
+    max-height: 64px;
+    position: fixed;
+    top: 0; right: 0; left: 0;
+    display: flex;
+    align-items: center;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px 12px;
+    border-left: none;
+    border-bottom: 1px solid var(--border);
+    transform: none;
+    -webkit-transform: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.35);
   }
-  .dash-sidebar.mfx-open { transform: translateX(0); }
+  .dash-sidebar .logo { display: none; }
+  .dash-sidebar nav {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    width: max-content;
+  }
+  .dash-nav-item {
+    white-space: nowrap;
+    padding: 8px 14px;
+    margin: 0;
+  }
   .dash-main { margin-right: 0; padding: 80px 16px 16px; }
-  .mfx-menu-toggle { display: flex; }
+  .mfx-menu-toggle, .mfx-sidebar-backdrop { display: none !important; }
 }
-
-/* Hamburger button that opens the drawer above — hidden on desktop
-   (the sidebar is already always visible there), shown only ≤768px via
-   the media query above. Fixed to the top corner so it's reachable from
-   every dashboard page without touching each page's own header markup. */
-.mfx-menu-toggle {
-  display: none;
-  position: fixed;
-  top: 16px; right: 16px;
-  z-index: 200;
-  width: 44px; height: 44px;
-  align-items: center; justify-content: center;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  color: var(--text);
-  font-size: 1.3rem;
-  cursor: pointer;
-}
-/* Dims the page behind the open drawer and, more importantly, is the
-   tap target that closes it again — without this, a phone user could
-   open the drawer but have no obvious way to dismiss it short of
-   picking a link. Toggle its "mfx-open" class together with the
-   sidebar's from the same bit of JS. */
-.mfx-sidebar-backdrop {
-  display: none;
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.5);
-  z-index: 99;
-}
-.mfx-sidebar-backdrop.mfx-open { display: block; }
 
 /* ===== Global loading spinner — two-tone (accent + accent-2), so even
    the small inline version carries the midnight/copper identity instead
