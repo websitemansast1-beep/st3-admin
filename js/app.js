@@ -1,9 +1,7 @@
-// ===== MFX Admin App =====
-// ===== MFX Admin App =====
-const API = 'https://web-production-dcdc4.up.railway.app/api';
+const API = 'https://web-production-fea72.up.railway.app/api';
 // Used to build the QR-code deep link students scan to log in with a
 // pre-filled code. Update this if the student site's domain ever changes.
-const STUDENT_SITE_URL = 'https://st3-student.vercel.app';
+const STUDENT_SITE_URL = 'https://st2webite.vercel.app';
 
 
 function toast(msg) {
